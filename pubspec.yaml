@@ -44,6 +44,7 @@ dependencies:
   pdfrx: ^2.4.7
   syncfusion_flutter_pdfviewer: ^33.2.13
   mobile_scanner: ^7.4.0
+  web_socket_channel: ^3.0.3
 
 dev_dependencies:
   flutter_test:

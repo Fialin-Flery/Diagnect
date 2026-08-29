@@ -460,6 +460,203 @@ class AuthApiService {
     return data;
   }
 
+  // =========================================================
+// CREATE SHARING SESSION
+// =========================================================
+
+  Future<Map<String, dynamic>>
+  createSharingSession(
+      String doctorName,
+      String? doctorHospital,
+      ) async {
+
+    final response =
+    await http.post(
+
+      Uri.parse(
+        '$baseUrl/sharing/create',
+      ),
+
+      headers:
+      _headers(),
+
+      body:
+      jsonEncode({
+
+        'doctor_name':
+        doctorName,
+
+        'doctor_hospital':
+        doctorHospital,
+      }),
+    );
+
+
+    final data =
+    _decodeResponse(
+      response,
+    );
+
+
+    if (response.statusCode != 200) {
+
+      throw Exception(
+        data['detail']
+            ??
+            'Unable to create sharing session.',
+      );
+    }
+
+
+    return data;
+  }
+
+
+// =========================================================
+// JOIN SHARING SESSION
+// =========================================================
+
+  Future<Map<String, dynamic>>
+  joinSharingSession(
+      String token,
+      String roomId,
+      String patientToken,
+      ) async {
+
+    final response =
+    await http.post(
+
+      Uri.parse(
+        '$baseUrl/sharing/join',
+      ),
+
+      headers:
+      _headers(
+        token: token,
+      ),
+
+      body:
+      jsonEncode({
+
+        'room_id':
+        roomId,
+
+        'patient_token':
+        patientToken,
+      }),
+    );
+
+
+    final data =
+    _decodeResponse(
+      response,
+    );
+
+
+    if (response.statusCode != 200) {
+
+      throw Exception(
+        data['detail']
+            ??
+            'Unable to join medical sharing session.',
+      );
+    }
+
+
+    return data;
+  }
+
+
+// =========================================================
+// GET SHARING SESSION
+// =========================================================
+
+  Future<Map<String, dynamic>>
+  getSharingSession(
+      String token,
+      String roomId,
+      ) async {
+
+    final response =
+    await http.get(
+
+      Uri.parse(
+        '$baseUrl/sharing/'
+            '${Uri.encodeComponent(roomId)}',
+      ),
+
+      headers:
+      _headers(
+        token: token,
+      ),
+    );
+
+
+    final data =
+    _decodeResponse(
+      response,
+    );
+
+
+    if (response.statusCode != 200) {
+
+      throw Exception(
+        data['detail']
+            ??
+            'Unable to retrieve sharing session.',
+      );
+    }
+
+
+    return data;
+  }
+
+
+// =========================================================
+// END SHARING SESSION
+// =========================================================
+
+  Future<Map<String, dynamic>>
+  endSharingSession(
+      String token,
+      String roomId,
+      ) async {
+
+    final response =
+    await http.post(
+
+      Uri.parse(
+        '$baseUrl/sharing/'
+            '${Uri.encodeComponent(roomId)}'
+            '/end',
+      ),
+
+      headers:
+      _headers(
+        token: token,
+      ),
+    );
+
+
+    final data =
+    _decodeResponse(
+      response,
+    );
+
+
+    if (response.statusCode != 200) {
+
+      throw Exception(
+        data['detail']
+            ??
+            'Unable to end sharing session.',
+      );
+    }
+
+
+    return data;
+  }
+
 // =========================================================
 // RESPONSE DECODER
 // =========================================================

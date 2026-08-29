@@ -7,10 +7,16 @@ import 'package:diagnect/services/local_database.dart';
 import 'package:diagnect/services/session_service.dart';
 import 'package:diagnect/models/report_model.dart';
 import 'package:diagnect/models/medical_history_model.dart';
+import 'package:diagnect/services/diagnect_session_service.dart';
 
 
 class AuthManager {
-  AuthManager._privateConstructor();
+  AuthManager._privateConstructor() {
+    DiagnectSessionService.instance
+        .registerDiagnosisCallback(
+      saveDiagnosisAsReport,
+    );
+  }
 
   static final AuthManager instance =
   AuthManager._privateConstructor();
@@ -745,6 +751,166 @@ class AuthManager {
       createdAt:
       now,
     );
+
+    await _database.insertReport(
+      report,
+    );
+  }
+
+  Future<void> saveDiagnosisAsReport(
+      Map<String, dynamic> diagnosis,
+      ) async {
+
+    final userId =
+    await getUserId();
+
+    if (userId == null ||
+        userId.isEmpty) {
+
+      debugPrint(
+        'Cannot save diagnosis: '
+            'no authenticated user.',
+      );
+
+      return;
+    }
+
+    final doctorName =
+    diagnosis['doctor_name']
+        ?.toString();
+
+    final hospital =
+    diagnosis['doctor_hospital']
+        ?.toString();
+
+    final diagnosisText =
+        diagnosis['diagnosis']
+            ?.toString()
+            ?? 'Diagnosis';
+
+    final symptoms =
+    diagnosis['symptoms'] is List
+        ? (diagnosis['symptoms'] as List)
+        .map(
+          (item) => item.toString(),
+    )
+        .join(', ')
+        : '';
+
+    final medicines =
+    diagnosis['medicines'] is List
+        ? (diagnosis['medicines'] as List)
+        .map(
+          (item) =>
+      item is Map
+          ? item['name']?.toString()
+          : item.toString(),
+    )
+        .whereType<String>()
+        .join(', ')
+        : '';
+
+    final notes =
+    diagnosis['clinical_notes']
+        ?.toString();
+
+    final descriptionParts =
+    <String>[];
+
+    if (doctorName != null &&
+        doctorName.isNotEmpty) {
+
+      descriptionParts.add(
+        'Doctor: $doctorName',
+      );
+    }
+
+    if (symptoms.isNotEmpty) {
+
+      descriptionParts.add(
+        'Symptoms: $symptoms',
+      );
+    }
+
+    if (medicines.isNotEmpty) {
+
+      descriptionParts.add(
+        'Medicines: $medicines',
+      );
+    }
+
+    if (notes != null &&
+        notes.isNotEmpty) {
+
+      descriptionParts.add(
+        'Doctor Notes: $notes',
+      );
+    }
+
+    final description =
+    descriptionParts.join(
+      '\n\n',
+    );
+
+    final now =
+    DateTime.now();
+
+    final report =
+    ReportModel(
+
+      userId:
+      userId,
+
+      title:
+      diagnosisText,
+
+      hospital:
+      hospital,
+
+      type:
+      'Diagnosis',
+
+      description:
+      description,
+
+      filePath:
+      null,
+
+      filePaths:
+      const [],
+
+      fileType:
+      null,
+
+      reportDate:
+      now
+          .toIso8601String()
+          .split('T')
+          .first,
+
+      createdAt:
+      now
+          .toUtc()
+          .toIso8601String(),
+    );
+
+    await saveLocalReport(
+      report,
+    );
+
+    debugPrint(
+      'Diagnosis added to local reports.',
+    );
+  }
+
+
+  // =========================================================
+  // SAVE LOCAL REPORT
+  // =========================================================
+
+  Future<void> saveLocalReport(
+      ReportModel report,
+      ) async {
 
     await _database.insertReport(
       report,

@@ -11,7 +11,8 @@ import 'package:diagnect/features/profile/profile_page.dart';
 import 'package:diagnect/features/qr_scan/qr_scanner_widget.dart';
 import 'package:diagnect/features/medical_history/medical_history_page.dart';
 import 'package:diagnect/models/medical_history_model.dart';
-
+import 'package:diagnect/services/diagnect_session_service.dart';
+import 'package:diagnect/services/sharing_service.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({
@@ -31,6 +32,13 @@ class HomePage extends StatefulWidget {
 class _HomePageState
     extends State<HomePage> {
   int _selectedIndex = 0;
+
+  final DiagnectSessionService
+  _sessionService =
+      DiagnectSessionService.instance;
+
+  final SharingService _sharingService =
+      SharingService.instance;
 
   final AuthManager _authManager =
       AuthManager.instance;
@@ -61,6 +69,26 @@ class _HomePageState
     _loadProfile();
     _loadReports();
     _loadMedicalHistory();
+    _sessionService.addListener(
+      _onSessionChanged,
+    );
+  }
+
+  void _onSessionChanged() {
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _sessionService.removeListener(
+      _onSessionChanged,
+    );
+    super.dispose();
   }
 
   // =========================================================
@@ -94,6 +122,204 @@ class _HomePageState
     } catch (e) {
       debugPrint(
         'Background profile sync failed: $e',
+      );
+    }
+  }
+
+  // =========================================================
+// HANDLE DOCTOR QR
+// =========================================================
+
+  Future<void> _handleQrScanned(
+      String qrText,
+      ) async {
+    debugPrint(
+      '========================================',
+    );
+
+    debugPrint(
+      'Handling doctor QR...',
+    );
+
+    debugPrint(
+      'QR: $qrText',
+    );
+
+    debugPrint(
+      '========================================',
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    // =======================================================
+    // VALIDATE QR
+    //
+    // SharingService is responsible for parsing the QR.
+    // The expected format is:
+    //
+    // diagnect://patient-connect/<room_id>?token=<patient_token>
+    //
+    // Do not manually extract roomId here.
+    // =======================================================
+
+    try {
+      _sharingService.parseQr(qrText);
+    } catch (e) {
+      debugPrint(
+        'Invalid doctor QR: $e',
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context)
+          .showSnackBar(
+        SnackBar(
+          content: Text(
+            e.toString().replaceFirst(
+              'Exception: ',
+              '',
+            ),
+          ),
+          behavior:
+          SnackBarBehavior.floating,
+        ),
+      );
+
+      return;
+    }
+
+    // =======================================================
+    // CHECK AUTHENTICATED SESSION
+    // =======================================================
+
+    final token =
+    await _authManager.getAccessToken();
+
+    if (!mounted) {
+      return;
+    }
+
+    if (token == null ||
+        token.isEmpty) {
+      debugPrint(
+        'Cannot join sharing session: '
+            'no access token.',
+      );
+
+      ScaffoldMessenger.of(context)
+          .showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Your session has expired. Please login again.',
+          ),
+          behavior:
+          SnackBarBehavior.floating,
+        ),
+      );
+
+      return;
+    }
+
+    // =======================================================
+    // JOIN SHARING SESSION
+    //
+    // IMPORTANT:
+    //
+    // SharingService.joinSession() accepts the COMPLETE
+    // QR string as a positional argument.
+    //
+    // It internally:
+    //
+    // 1. Parses the QR
+    // 2. Extracts room_id
+    // 3. Extracts patient_token
+    // 4. Calls /sharing/join
+    // 5. Stores the sharing session information
+    // 6. Opens the sharing WebSocket
+    // 7. Sends patient data
+    //
+    // Therefore DO NOT call connectWebSocket() here.
+    // =======================================================
+
+    try {
+      debugPrint(
+        'Joining sharing session...',
+      );
+
+      final result =
+      await _sharingService.joinSession(
+        qrText,
+      );
+
+      debugPrint(
+        'Sharing session joined successfully.',
+      );
+
+      debugPrint(
+        'Join response: $result',
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      // =====================================================
+      // SESSION IS NOW ACTIVE
+      //
+      // SharingService.joinSession() already calls connect().
+      //
+      // The separate DiagnectSessionService is responsible
+      // for the doctor-session WebSocket/event state.
+      // =====================================================
+
+      setState(() {});
+
+      ScaffoldMessenger.of(context)
+          .showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Connected to doctor. Your medical records are now available for consultation.',
+          ),
+          behavior:
+          SnackBarBehavior.floating,
+        ),
+      );
+
+      // =====================================================
+      // RETURN TO HOME
+      // =====================================================
+
+      _selectPage(0);
+    } catch (e, stackTrace) {
+      debugPrint(
+        'Unable to join sharing session: $e',
+      );
+
+      debugPrint(
+        '$stackTrace',
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context)
+          .showSnackBar(
+        SnackBar(
+          content: Text(
+            'Unable to connect to doctor: '
+                '${e.toString().replaceFirst(
+              'Exception: ',
+              '',
+            )}',
+          ),
+          behavior:
+          SnackBarBehavior.floating,
+        ),
       );
     }
   }
@@ -1559,40 +1785,124 @@ class _HomePageState
   // =========================================================
 
   Widget _buildActiveAccessCard() {
-    return Container(
-      width: double.infinity,
-      padding:
-      const EdgeInsets.all(18),
-      decoration:
-      BoxDecoration(
-        color:
-        AppColors.surface,
-        borderRadius:
-        BorderRadius.circular(
-          16,
-        ),
-        border: Border.all(
-          color: AppColors.success
-              .withValues(
-            alpha: 0.25,
+
+    final session =
+        _sessionService.activeSession;
+
+    // =======================================================
+    // NO ACTIVE SESSION
+    // =======================================================
+
+    if (session == null) {
+
+      return Container(
+        width: double.infinity,
+
+        padding:
+        const EdgeInsets.all(20),
+
+        decoration: BoxDecoration(
+          borderRadius:
+          BorderRadius.circular(20),
+
+          border: Border.all(
+            color: Colors.grey.shade300,
           ),
         ),
+
+        child: Column(
+          crossAxisAlignment:
+          CrossAxisAlignment.start,
+
+          children: [
+
+            const Text(
+              'No Active Session',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight:
+                FontWeight.w600,
+              ),
+            ),
+
+            const SizedBox(
+              height: 8,
+            ),
+
+            Text(
+              'Scan a doctor\'s QR code '
+                  'to share your medical records.',
+              style: TextStyle(
+                color: Colors.grey.shade600,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // =======================================================
+    // SESSION INFORMATION
+    // =======================================================
+
+    final doctor =
+    session['doctor'];
+
+    String doctorName =
+        'Doctor';
+
+    String hospital =
+        'Hospital';
+
+    if (doctor is Map<String, dynamic>) {
+
+      doctorName =
+          doctor['name']
+              ?.toString()
+              ?? 'Doctor';
+
+      hospital =
+          doctor['hospital']
+              ?.toString()
+              ?? 'Hospital';
+    }
+
+    final expiresAt =
+    session['expires_at']
+        ?.toString();
+
+    return Container(
+      width: double.infinity,
+
+      padding:
+      const EdgeInsets.all(20),
+
+      decoration: BoxDecoration(
+        borderRadius:
+        BorderRadius.circular(20),
+
+        border: Border.all(
+          color: Colors.deepPurple.shade200,
+        ),
       ),
+
       child: Column(
         crossAxisAlignment:
         CrossAxisAlignment.start,
+
         children: [
+
           Row(
             children: [
+
               Container(
                 width: 10,
                 height: 10,
+
                 decoration:
                 const BoxDecoration(
-                  color:
-                  AppColors.success,
-                  shape:
-                  BoxShape.circle,
+                  shape: BoxShape.circle,
+                  color: Colors.green,
                 ),
               ),
 
@@ -1601,14 +1911,11 @@ class _HomePageState
               ),
 
               const Text(
-                'Medical access active',
-                style:
-                TextStyle(
-                  color:
-                  AppColors.success,
-                  fontSize: 14,
+                'Active Session',
+                style: TextStyle(
+                  fontSize: 18,
                   fontWeight:
-                  FontWeight.w700,
+                  FontWeight.w600,
                 ),
               ),
             ],
@@ -1618,15 +1925,12 @@ class _HomePageState
             height: 16,
           ),
 
-          const Text(
-            'Dr. Amit Sharma',
-            style:
-            TextStyle(
-              fontSize: 16,
+          Text(
+            doctorName,
+            style: const TextStyle(
+              fontSize: 17,
               fontWeight:
-              FontWeight.w700,
-              color:
-              AppColors.primaryText,
+              FontWeight.w600,
             ),
           ),
 
@@ -1634,49 +1938,25 @@ class _HomePageState
             height: 4,
           ),
 
-          const Text(
-            'XYZ Hospital',
-            style:
-            TextStyle(
-              fontSize: 13,
-              color:
-              AppColors.secondaryText,
+          Text(
+            hospital,
+            style: TextStyle(
+              color: Colors.grey.shade600,
             ),
           ),
 
           const SizedBox(
-            height: 14,
+            height: 12,
           ),
 
-          const Text(
-            'Expires after consultation',
-            style:
-            TextStyle(
-              fontSize: 12,
-              color:
-              AppColors.secondaryText,
-            ),
-          ),
-
-          const SizedBox(
-            height: 14,
-          ),
-
-          SizedBox(
-            width: double.infinity,
-            child:
-            OutlinedButton(
-              onPressed: () {
-                _showComingSoon(
-                  'Access Details',
-                );
-              },
-              child:
-              const Text(
-                'View Access',
+          if (expiresAt != null)
+            Text(
+              'Session expires: $expiresAt',
+              style: TextStyle(
+                color: Colors.grey.shade600,
+                fontSize: 13,
               ),
             ),
-          ),
         ],
       ),
     );
@@ -1697,20 +1977,14 @@ class _HomePageState
 
           QrScannerWidget(
             isActive: _selectedIndex == 1,
-            onQrScanned: (qrText) {
+            onQrScanned: (qrText) async {
               debugPrint(
                 'HomePage received QR text: $qrText',
               );
 
-              // ---------------------------------------------------
-              // TODO:
-              // This is where we will handle the doctor QR data.
-              //
-              // For now we only print the QR value.
-              // ---------------------------------------------------
-
-              // The scanner itself has already stopped at this
-              // point.
+              await _handleQrScanned(
+                qrText,
+              );
             },
           ),
 
