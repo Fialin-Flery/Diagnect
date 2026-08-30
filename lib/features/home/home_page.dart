@@ -33,9 +33,6 @@ class _HomePageState
     extends State<HomePage> {
   int _selectedIndex = 0;
 
-  final DiagnectSessionService
-  _sessionService =
-      DiagnectSessionService.instance;
 
   final SharingService _sharingService =
       SharingService.instance;
@@ -69,25 +66,30 @@ class _HomePageState
     _loadProfile();
     _loadReports();
     _loadMedicalHistory();
-    _sessionService.addListener(
-      _onSessionChanged,
+
+    _sharingService.addListener(
+      _onSharingSessionChanged,
     );
   }
 
-  void _onSessionChanged() {
-
+  void _onSharingSessionChanged() {
     if (!mounted) {
       return;
     }
+
+    debugPrint(
+      'HomePage: sharing session changed.',
+    );
 
     setState(() {});
   }
 
   @override
   void dispose() {
-    _sessionService.removeListener(
-      _onSessionChanged,
+    _sharingService.removeListener(
+      _onSharingSessionChanged,
     );
+
     super.dispose();
   }
 
@@ -165,10 +167,48 @@ class _HomePageState
     // =======================================================
 
     try {
-      _sharingService.parseQr(qrText);
-    } catch (e) {
       debugPrint(
-        'Invalid doctor QR: $e',
+        'Joining sharing session...',
+      );
+
+      final result =
+      await _sharingService.joinSession(
+        qrText,
+      );
+
+      debugPrint(
+        'Sharing session joined successfully.',
+      );
+
+      debugPrint(
+        'Join response: $result',
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context)
+          .showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Connected to doctor. Your medical records are now available for consultation.',
+          ),
+          behavior:
+          SnackBarBehavior.floating,
+        ),
+      );
+
+      _selectPage(0);
+
+    } catch (e, stackTrace) {
+
+      debugPrint(
+        'Unable to join sharing session: $e',
+      );
+
+      debugPrint(
+        '$stackTrace',
       );
 
       if (!mounted) {
@@ -179,17 +219,12 @@ class _HomePageState
           .showSnackBar(
         SnackBar(
           content: Text(
-            e.toString().replaceFirst(
-              'Exception: ',
-              '',
-            ),
+            'Unable to connect to doctor: $e',
           ),
           behavior:
           SnackBarBehavior.floating,
         ),
       );
-
-      return;
     }
 
     // =======================================================
@@ -1786,8 +1821,7 @@ class _HomePageState
 
   Widget _buildActiveAccessCard() {
 
-    final session =
-        _sessionService.activeSession;
+    final session = _sharingService.activeSession;
 
     // =======================================================
     // NO ACTIVE SESSION

@@ -10,7 +10,7 @@ import 'package:diagnect/services/auth_manager.dart';
 import 'package:diagnect/services/auth_api_service.dart';
 
 
-class SharingService {
+class SharingService extends ChangeNotifier {
 
   SharingService._privateConstructor();
 
@@ -36,6 +36,8 @@ class SharingService {
 
   DateTime? _expiresAt;
 
+  Map<String, dynamic>? _activeSession;
+
 
   final StreamController<
       Map<String, dynamic>
@@ -49,17 +51,20 @@ class SharingService {
   get events =>
       _eventsController.stream;
 
-
   bool get isConnected =>
       _socket != null;
-
 
   String? get roomId =>
       _roomId;
 
-
   DateTime? get expiresAt =>
       _expiresAt;
+
+  Map<String, dynamic>? get activeSession =>
+      _activeSession;
+
+  bool get hasActiveSession =>
+      _activeSession != null;
 
 
   // =========================================================
@@ -209,8 +214,47 @@ class SharingService {
     }
 
 
-    await connect();
+    _activeSession = Map<String, dynamic>.from(result);
 
+    debugPrint(
+      'Active sharing session stored: $_activeSession',
+    );
+
+    debugPrint(
+      '========================================',
+    );
+
+    debugPrint(
+      'ACTIVE SHARING SESSION',
+    );
+
+    debugPrint(
+      'Room ID: $_roomId',
+    );
+
+    debugPrint(
+      'Doctor: ${result['doctor']}',
+    );
+
+    debugPrint(
+      'Status: ${result['status']}',
+    );
+
+    debugPrint(
+      'Expires: ${result['expires_at']}',
+    );
+
+    debugPrint(
+      'Remaining: ${result['remaining_seconds']}',
+    );
+
+    debugPrint(
+      '========================================',
+    );
+
+    notifyListeners();
+
+    await connect();
 
     return result;
   }
@@ -462,13 +506,27 @@ class SharingService {
   void _handleEvent(
       Map<String, dynamic> event,
       ) {
-
     final type =
-    event['type']
-        ?.toString();
+    event['type']?.toString();
 
+    debugPrint(
+      'Sharing event received: $event',
+    );
 
     switch (type) {
+
+      case 'PATIENT_JOINED':
+
+        if (_activeSession == null) {
+          _activeSession = {};
+        }
+
+        _activeSession!['patient_connected'] =
+            event['patient_connected'] == true;
+
+        notifyListeners();
+
+        break;
 
       case 'DIAGNOSIS_SAVED':
 
@@ -478,23 +536,39 @@ class SharingService {
 
         break;
 
-
       case 'SESSION_ENDED':
 
         debugPrint(
           'Sharing session ended.',
         );
 
+        _activeSession = null;
+
+        notifyListeners();
+
         disconnect();
 
         break;
-
 
       case 'SESSION_EXPIRED':
 
+        debugPrint(
+          'Sharing session expired.',
+        );
+
+        _activeSession = null;
+
+        notifyListeners();
+
         disconnect();
 
         break;
+
+      default:
+
+        debugPrint(
+          'Unknown sharing event: $type',
+        );
     }
   }
 
@@ -504,19 +578,16 @@ class SharingService {
   // =========================================================
 
   Future<void> disconnect() async {
-
     await _socketSubscription
         ?.cancel();
 
     _socketSubscription =
     null;
 
-
     await _socket?.close();
 
     _socket =
     null;
-
 
     _roomId =
     null;
@@ -526,6 +597,11 @@ class SharingService {
 
     _expiresAt =
     null;
+
+    _activeSession =
+    null;
+
+    notifyListeners();
   }
 
 
