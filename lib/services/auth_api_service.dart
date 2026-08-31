@@ -1,6 +1,6 @@
 
 import 'dart:convert';
-
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 class AuthApiService {
@@ -523,6 +523,37 @@ class AuthApiService {
       String patientToken,
       ) async {
 
+    debugPrint(
+      '========================================',
+    );
+
+    debugPrint(
+      'JOIN SHARING SESSION',
+    );
+
+    debugPrint(
+      'ROOM ID: $roomId',
+    );
+
+    debugPrint(
+      'ACCESS TOKEN LENGTH: ${token.length}',
+    );
+
+    debugPrint(
+      'ACCESS TOKEN START: ${token.substring(
+        0,
+        token.length > 30 ? 30 : token.length,
+      )}',
+    );
+
+    debugPrint(
+      'PATIENT TOKEN LENGTH: ${patientToken.length}',
+    );
+
+    debugPrint(
+      '========================================',
+    );
+
     final response =
     await http.post(
 
@@ -546,12 +577,30 @@ class AuthApiService {
       }),
     );
 
+    debugPrint(
+      '========================================',
+    );
+
+    debugPrint(
+      'JOIN RESPONSE',
+    );
+
+    debugPrint(
+      'STATUS: ${response.statusCode}',
+    );
+
+    debugPrint(
+      'BODY: ${response.body}',
+    );
+
+    debugPrint(
+      '========================================',
+    );
 
     final data =
     _decodeResponse(
       response,
     );
-
 
     if (response.statusCode != 200) {
 
@@ -561,7 +610,6 @@ class AuthApiService {
             'Unable to join medical sharing session.',
       );
     }
-
 
     return data;
   }

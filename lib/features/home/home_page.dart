@@ -675,7 +675,7 @@ class _HomePageState
           ),
         ],
 
-    ),
+      ),
 
       drawer:
       _buildDrawer(),

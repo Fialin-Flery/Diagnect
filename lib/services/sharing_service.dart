@@ -118,14 +118,11 @@ class SharingService extends ChangeNotifier {
     }
 
 
-    final roomId =
-        pathSegments.first;
+    final roomId = (uri.queryParameters['room']?.trim().isNotEmpty == true)
+        ? uri.queryParameters['room']!.trim()
+        : pathSegments.first.trim();
 
-
-    final token =
-    uri.queryParameters[
-    'token'
-    ];
+    final token = uri.queryParameters['token']?.trim();
 
 
     if (roomId.isEmpty ||
@@ -171,22 +168,17 @@ class SharingService extends ChangeNotifier {
     qr['patient_token']!;
 
 
-    final accessToken =
-    await _authManager
-        .getAccessToken();
-
-
-    if (accessToken == null ||
-        accessToken.isEmpty) {
-
-      throw Exception(
-        'No authenticated Diagnect session.',
-      );
+    final restored = await _authManager.restoreSession();
+    if (!restored) {
+      throw Exception('Your DiagNect login session has expired. Please login again.');
     }
 
+    final accessToken = await _authManager.getAccessToken();
+    if (accessToken == null || accessToken.isEmpty) {
+      throw Exception('No authenticated DiagNect session.');
+    }
 
-    final result =
-    await _api.joinSharingSession(
+    final result = await _api.joinSharingSession(
       accessToken,
       roomId,
       patientToken,
@@ -569,6 +561,32 @@ class SharingService extends ChangeNotifier {
         debugPrint(
           'Unknown sharing event: $type',
         );
+    }
+  }
+
+
+  // =========================================================
+  // END SESSION
+  // =========================================================
+
+  Future<void> endSession() async {
+    final roomId = _roomId;
+    if (roomId == null) {
+      await disconnect();
+      return;
+    }
+
+    try {
+      if (await _authManager.restoreSession()) {
+        final token = await _authManager.getAccessToken();
+        if (token != null && token.isNotEmpty) {
+          await _api.endSharingSession(token, roomId);
+        }
+      }
+    } catch (e) {
+      debugPrint('End sharing session request failed: $e');
+    } finally {
+      await disconnect();
     }
   }
 
