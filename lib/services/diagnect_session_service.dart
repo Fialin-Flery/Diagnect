@@ -38,7 +38,7 @@ class DiagnectSessionService extends ChangeNotifier {
     disconnect();
 
     final uri = Uri.parse(
-      'ws://10.64.183.36:8000/ws/session/$sessionId'
+      'ws://10.109.209.36:8000/ws/session/$sessionId'
           '?token=${Uri.encodeComponent(accessToken)}',
     );
 

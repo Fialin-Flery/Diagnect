@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-
+import 'dart:async';
 import 'package:diagnect/app/theme/app_colors.dart';
 import 'package:diagnect/features/auth/login_page.dart';
 import 'package:diagnect/features/reports/add_report_page.dart';
@@ -33,6 +33,7 @@ class _HomePageState
     extends State<HomePage> {
   int _selectedIndex = 0;
 
+  Timer? _sessionTimer;
 
   final SharingService _sharingService =
       SharingService.instance;
@@ -70,6 +71,10 @@ class _HomePageState
     _sharingService.addListener(
       _onSharingSessionChanged,
     );
+
+    if (_sharingService.hasActiveSession) {
+      _startSessionTimer();
+    }
   }
 
   void _onSharingSessionChanged() {
@@ -81,11 +86,107 @@ class _HomePageState
       'HomePage: sharing session changed.',
     );
 
+    if (_sharingService.hasActiveSession) {
+      _startSessionTimer();
+    } else {
+      _stopSessionTimer();
+    }
+
     setState(() {});
+  }
+
+  void _startSessionTimer() {
+    _sessionTimer?.cancel();
+
+    if (_sharingService.expiresAt == null) {
+      return;
+    }
+
+    _sessionTimer = Timer.periodic(
+      const Duration(seconds: 1),
+          (_) async {
+        if (!mounted) {
+          return;
+        }
+
+        final expiresAt = _sharingService.expiresAt;
+
+        if (expiresAt == null) {
+          _sessionTimer?.cancel();
+          return;
+        }
+
+        final remaining = expiresAt.difference(DateTime.now());
+
+        if (remaining.isNegative ||
+            remaining.inSeconds <= 0) {
+          _sessionTimer?.cancel();
+
+          await _sharingService.disconnect();
+
+          if (!mounted) {
+            return;
+          }
+
+          setState(() {});
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'The doctor sharing session has expired.',
+              ),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+
+          return;
+        }
+
+        setState(() {});
+      },
+    );
+  }
+
+  void _stopSessionTimer() {
+    _sessionTimer?.cancel();
+    _sessionTimer = null;
+  }
+
+  String _formatRemainingTime() {
+    final expiresAt = _sharingService.expiresAt;
+
+    if (expiresAt == null) {
+      return '--:--';
+    }
+
+    final difference =
+    expiresAt.difference(DateTime.now());
+
+    if (difference.isNegative ||
+        difference.inSeconds <= 0) {
+      return '00:00';
+    }
+
+    final hours = difference.inHours;
+    final minutes =
+    difference.inMinutes.remainder(60);
+    final seconds =
+    difference.inSeconds.remainder(60);
+
+    if (hours > 0) {
+      return '${hours.toString().padLeft(2, '0')}:'
+          '${minutes.toString().padLeft(2, '0')}:'
+          '${seconds.toString().padLeft(2, '0')}';
+    }
+
+    return '${minutes.toString().padLeft(2, '0')}:'
+        '${seconds.toString().padLeft(2, '0')}';
   }
 
   @override
   void dispose() {
+    _stopSessionTimer();
+
     _sharingService.removeListener(
       _onSharingSessionChanged,
     );
@@ -132,163 +233,51 @@ class _HomePageState
 // HANDLE DOCTOR QR
 // =========================================================
 
-  Future<void> _handleQrScanned(
-      String qrText,
-      ) async {
-    debugPrint(
-      '========================================',
-    );
-
-    debugPrint(
-      'Handling doctor QR...',
-    );
-
-    debugPrint(
-      'QR: $qrText',
-    );
-
-    debugPrint(
-      '========================================',
-    );
+  Future<void> _handleQrScanned(String qrText) async {
+    debugPrint('========================================');
+    debugPrint('Handling doctor QR...');
+    debugPrint('QR: $qrText');
+    debugPrint('========================================');
 
     if (!mounted) {
       return;
     }
 
-    // =======================================================
-    // VALIDATE QR
-    //
-    // SharingService is responsible for parsing the QR.
-    // The expected format is:
-    //
-    // diagnect://patient-connect/<room_id>?token=<patient_token>
-    //
-    // Do not manually extract roomId here.
-    // =======================================================
+    // ---------------------------------------------------------
+    // CHECK AUTHENTICATION FIRST
+    // ---------------------------------------------------------
 
-    try {
-      debugPrint(
-        'Joining sharing session...',
-      );
-
-      final result =
-      await _sharingService.joinSession(
-        qrText,
-      );
-
-      debugPrint(
-        'Sharing session joined successfully.',
-      );
-
-      debugPrint(
-        'Join response: $result',
-      );
-
-      if (!mounted) {
-        return;
-      }
-
-      ScaffoldMessenger.of(context)
-          .showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Connected to doctor. Your medical records are now available for consultation.',
-          ),
-          behavior:
-          SnackBarBehavior.floating,
-        ),
-      );
-
-      _selectPage(0);
-
-    } catch (e, stackTrace) {
-
-      debugPrint(
-        'Unable to join sharing session: $e',
-      );
-
-      debugPrint(
-        '$stackTrace',
-      );
-
-      if (!mounted) {
-        return;
-      }
-
-      ScaffoldMessenger.of(context)
-          .showSnackBar(
-        SnackBar(
-          content: Text(
-            'Unable to connect to doctor: $e',
-          ),
-          behavior:
-          SnackBarBehavior.floating,
-        ),
-      );
-    }
-
-    // =======================================================
-    // CHECK AUTHENTICATED SESSION
-    // =======================================================
-
-    final token =
-    await _authManager.getAccessToken();
+    final token = await _authManager.getAccessToken();
 
     if (!mounted) {
       return;
     }
 
-    if (token == null ||
-        token.isEmpty) {
+    if (token == null || token.isEmpty) {
       debugPrint(
-        'Cannot join sharing session: '
-            'no access token.',
+        'Cannot join sharing session: no access token.',
       );
 
-      ScaffoldMessenger.of(context)
-          .showSnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
             'Your session has expired. Please login again.',
           ),
-          behavior:
-          SnackBarBehavior.floating,
+          behavior: SnackBarBehavior.floating,
         ),
       );
 
       return;
     }
 
-    // =======================================================
+    // ---------------------------------------------------------
     // JOIN SHARING SESSION
-    //
-    // IMPORTANT:
-    //
-    // SharingService.joinSession() accepts the COMPLETE
-    // QR string as a positional argument.
-    //
-    // It internally:
-    //
-    // 1. Parses the QR
-    // 2. Extracts room_id
-    // 3. Extracts patient_token
-    // 4. Calls /sharing/join
-    // 5. Stores the sharing session information
-    // 6. Opens the sharing WebSocket
-    // 7. Sends patient data
-    //
-    // Therefore DO NOT call connectWebSocket() here.
-    // =======================================================
+    // ---------------------------------------------------------
 
     try {
-      debugPrint(
-        'Joining sharing session...',
-      );
+      debugPrint('Joining sharing session...');
 
-      final result =
-      await _sharingService.joinSession(
-        qrText,
-      );
+      final result = await _sharingService.joinSession(qrText);
 
       debugPrint(
         'Sharing session joined successfully.',
@@ -302,32 +291,23 @@ class _HomePageState
         return;
       }
 
-      // =====================================================
-      // SESSION IS NOW ACTIVE
-      //
-      // SharingService.joinSession() already calls connect().
-      //
-      // The separate DiagnectSessionService is responsible
-      // for the doctor-session WebSocket/event state.
-      // =====================================================
+      // Start/update the countdown immediately.
+      if (_sharingService.hasActiveSession) {
+        _startSessionTimer();
+      }
 
       setState(() {});
 
-      ScaffoldMessenger.of(context)
-          .showSnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
             'Connected to doctor. Your medical records are now available for consultation.',
           ),
-          behavior:
-          SnackBarBehavior.floating,
+          behavior: SnackBarBehavior.floating,
         ),
       );
 
-      // =====================================================
-      // RETURN TO HOME
-      // =====================================================
-
+      // Return to Home.
       _selectPage(0);
     } catch (e, stackTrace) {
       debugPrint(
@@ -342,18 +322,13 @@ class _HomePageState
         return;
       }
 
-      ScaffoldMessenger.of(context)
-          .showSnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
             'Unable to connect to doctor: '
-                '${e.toString().replaceFirst(
-              'Exception: ',
-              '',
-            )}',
+                '${e.toString().replaceFirst('Exception: ', '')}',
           ),
-          behavior:
-          SnackBarBehavior.floating,
+          behavior: SnackBarBehavior.floating,
         ),
       );
     }
@@ -1820,7 +1795,6 @@ class _HomePageState
   // =========================================================
 
   Widget _buildActiveAccessCard() {
-
     final session = _sharingService.activeSession;
 
     // =======================================================
@@ -1828,46 +1802,58 @@ class _HomePageState
     // =======================================================
 
     if (session == null) {
-
       return Container(
         width: double.infinity,
-
-        padding:
-        const EdgeInsets.all(20),
-
+        padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-          borderRadius:
-          BorderRadius.circular(20),
-
+          color: const Color(0xFFF7F5FF),
+          borderRadius: BorderRadius.circular(22),
           border: Border.all(
-            color: Colors.grey.shade300,
+            color: AppColors.lightViolet.withOpacity(0.35),
           ),
         ),
-
-        child: Column(
-          crossAxisAlignment:
-          CrossAxisAlignment.start,
-
+        child: Row(
           children: [
-
-            const Text(
-              'No Active Session',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight:
-                FontWeight.w600,
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: AppColors.lightViolet.withOpacity(0.20),
+                borderRadius: BorderRadius.circular(15),
+              ),
+              child: const Icon(
+                Icons.lock_outline_rounded,
+                color: AppColors.primary,
+                size: 25,
               ),
             ),
 
-            const SizedBox(
-              height: 8,
-            ),
+            const SizedBox(width: 14),
 
-            Text(
-              'Scan a doctor\'s QR code '
-                  'to share your medical records.',
-              style: TextStyle(
-                color: Colors.grey.shade600,
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'No Active Session',
+                    style: TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.primaryText,
+                    ),
+                  ),
+
+                  const SizedBox(height: 4),
+
+                  Text(
+                    'Scan a doctor\'s QR code to share your medical records.',
+                    style: TextStyle(
+                      fontSize: 13,
+                      height: 1.4,
+                      color: Colors.grey.shade600,
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -1879,118 +1865,291 @@ class _HomePageState
     // SESSION INFORMATION
     // =======================================================
 
-    final doctor =
-    session['doctor'];
+    final doctor = session['doctor'];
 
-    String doctorName =
-        'Doctor';
-
-    String hospital =
-        'Hospital';
+    String doctorName = 'Doctor';
+    String hospital = 'Hospital';
 
     if (doctor is Map<String, dynamic>) {
-
       doctorName =
-          doctor['name']
-              ?.toString()
-              ?? 'Doctor';
+          doctor['name']?.toString() ?? 'Doctor';
 
       hospital =
-          doctor['hospital']
-              ?.toString()
-              ?? 'Hospital';
+          doctor['hospital']?.toString() ?? 'Hospital';
     }
 
-    final expiresAt =
-    session['expires_at']
-        ?.toString();
+    final remainingTime =
+    _formatRemainingTime();
 
     return Container(
       width: double.infinity,
-
-      padding:
-      const EdgeInsets.all(20),
-
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        borderRadius:
-        BorderRadius.circular(20),
-
-        border: Border.all(
-          color: Colors.deepPurple.shade200,
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            AppColors.primary.withOpacity(0.95),
+            AppColors.primary.withOpacity(0.78),
+          ],
         ),
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.primary.withOpacity(0.18),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
       ),
-
       child: Column(
-        crossAxisAlignment:
-        CrossAxisAlignment.start,
-
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+
+          // ---------------------------------------------------
+          // HEADER
+          // ---------------------------------------------------
 
           Row(
             children: [
-
               Container(
                 width: 10,
                 height: 10,
-
-                decoration:
-                const BoxDecoration(
+                decoration: const BoxDecoration(
                   shape: BoxShape.circle,
-                  color: Colors.green,
+                  color: Colors.greenAccent,
                 ),
               ),
 
-              const SizedBox(
-                width: 8,
-              ),
+              const SizedBox(width: 8),
 
               const Text(
-                'Active Session',
+                'ACTIVE SESSION',
                 style: TextStyle(
-                  fontSize: 18,
-                  fontWeight:
-                  FontWeight.w600,
+                  color: Colors.white70,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.1,
+                ),
+              ),
+
+              const Spacer(),
+
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 5,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.verified_user_outlined,
+                      size: 14,
+                      color: Colors.white,
+                    ),
+                    SizedBox(width: 5),
+                    Text(
+                      'Secure',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
           ),
 
-          const SizedBox(
-            height: 16,
-          ),
+          const SizedBox(height: 20),
+
+          // ---------------------------------------------------
+          // DOCTOR
+          // ---------------------------------------------------
 
           Text(
             doctorName,
             style: const TextStyle(
-              fontSize: 17,
-              fontWeight:
-              FontWeight.w600,
+              color: Colors.white,
+              fontSize: 22,
+              fontWeight: FontWeight.w700,
             ),
           ),
 
-          const SizedBox(
-            height: 4,
+          const SizedBox(height: 5),
+
+          Row(
+            children: [
+              const Icon(
+                Icons.local_hospital_outlined,
+                size: 17,
+                color: Colors.white70,
+              ),
+
+              const SizedBox(width: 7),
+
+              Expanded(
+                child: Text(
+                  hospital,
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
           ),
 
-          Text(
-            hospital,
-            style: TextStyle(
-              color: Colors.grey.shade600,
+          const SizedBox(height: 20),
+
+          // ---------------------------------------------------
+          // TIMER
+          // ---------------------------------------------------
+
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(
+              horizontal: 14,
+              vertical: 12,
+            ),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.timer_outlined,
+                  color: Colors.white,
+                  size: 22,
+                ),
+
+                const SizedBox(width: 10),
+
+                const Text(
+                  'Session ends in',
+                  style: TextStyle(
+                    color: Colors.white70,
+                    fontSize: 13,
+                  ),
+                ),
+
+                const Spacer(),
+
+                Text(
+                  remainingTime,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 19,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1,
+                  ),
+                ),
+              ],
             ),
           ),
 
-          const SizedBox(
-            height: 12,
-          ),
+          const SizedBox(height: 14),
 
-          if (expiresAt != null)
-            Text(
-              'Session expires: $expiresAt',
-              style: TextStyle(
-                color: Colors.grey.shade600,
-                fontSize: 13,
+          // ---------------------------------------------------
+          // END SESSION BUTTON
+          // ---------------------------------------------------
+
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () async {
+                final shouldEnd =
+                await showDialog<bool>(
+                  context: context,
+                  builder: (context) {
+                    return AlertDialog(
+                      title: const Text(
+                        'End sharing session?',
+                      ),
+                      content: const Text(
+                        'The doctor will no longer be able to access your medical records through this session.',
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () {
+                            Navigator.of(context)
+                                .pop(false);
+                          },
+                          child: const Text('Cancel'),
+                        ),
+                        FilledButton(
+                          onPressed: () {
+                            Navigator.of(context)
+                                .pop(true);
+                          },
+                          child: const Text(
+                            'End Session',
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                );
+
+                if (shouldEnd != true) {
+                  return;
+                }
+
+                await _sharingService.disconnect();
+
+                if (!mounted) {
+                  return;
+                }
+
+                _stopSessionTimer();
+
+                setState(() {});
+
+                ScaffoldMessenger.of(context)
+                    .showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'Sharing session ended.',
+                    ),
+                    behavior:
+                    SnackBarBehavior.floating,
+                  ),
+                );
+              },
+              icon: const Icon(
+                Icons.stop_circle_outlined,
+                size: 19,
+              ),
+              label: const Text(
+                'End Session',
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.white,
+                side: BorderSide(
+                  color: Colors.white.withOpacity(0.45),
+                ),
+                padding:
+                const EdgeInsets.symmetric(
+                  vertical: 13,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius:
+                  BorderRadius.circular(14),
+                ),
               ),
             ),
+          ),
         ],
       ),
     );

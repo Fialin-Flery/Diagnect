@@ -5,7 +5,7 @@ import 'package:http/http.dart' as http;
 
 class AuthApiService {
   static const String baseUrl =
-      'http://10.64.183.36:8000/api';
+      'http://10.109.209.36:8000/api';
 
 // =========================================================
 // COMMON HEADERS
