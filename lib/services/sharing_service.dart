@@ -373,9 +373,18 @@ class SharingService extends ChangeNotifier {
       String token,
       ) {
 
-    const base =
-        'ws://10.109.209.36:8000';
-
+    // Derive the WebSocket host from AuthApiService.baseUrl instead of
+    // hardcoding a second, independent IP here. AuthApiService.baseUrl
+    // looks like 'http://<ip>:8000/api' — strip the scheme and '/api'
+    // suffix, then rebuild as a ws:// URL. This way there's exactly ONE
+    // place (AuthApiService.baseUrl) to update when the hotspot IP changes,
+    // instead of two places going out of sync.
+    final httpBase = AuthApiService.baseUrl; // e.g. http://192.168.x.x:8000/api
+    final hostPart = httpBase
+        .replaceFirst(RegExp(r'^https?://'), '')
+        .replaceFirst(RegExp(r'/api/?$'), '');
+    final scheme = httpBase.startsWith('https') ? 'wss' : 'ws';
+    final base = '$scheme://$hostPart';
 
     return
       '$base/api/sharing/ws/'
